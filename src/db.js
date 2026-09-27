@@ -77,9 +77,11 @@ class Store {
       params.push(category);
     }
     if (q) {
-      sql += ' AND (name LIKE ? OR color LIKE ? OR brand LIKE ? OR subcategory LIKE ? OR tags LIKE ? OR notes LIKE ?)';
-      const like = `%${q}%`;
-      params.push(like, like, like, like, like, like);
+      // %, _ 는 LIKE 와일드카드라서 검색어에 들어 있으면 글자 그대로 찾도록 이스케이프한다.
+      const cols = ['name', 'color', 'brand', 'subcategory', 'tags', 'notes'];
+      sql += ` AND (${cols.map((c) => `${c} LIKE ? ESCAPE '\\'`).join(' OR ')})`;
+      const like = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
+      params.push(...cols.map(() => like));
     }
     sql += ' ORDER BY created_at DESC';
     return this.db.prepare(sql).all(...params).map(rowToItem);
@@ -111,7 +113,17 @@ class Store {
   }
 
   deleteItem(id) {
-    return this.db.prepare('DELETE FROM items WHERE id = ?').run(id).changes > 0;
+    const deleted = this.db.prepare('DELETE FROM items WHERE id = ?').run(id).changes > 0;
+    if (deleted) {
+      // 저장한 코디에서도 빼고, 남은 아이템이 없는 코디는 지운다.
+      for (const outfit of this.listOutfits()) {
+        if (!outfit.item_ids.includes(id)) continue;
+        const rest = outfit.item_ids.filter((i) => i !== id);
+        if (rest.length) this.db.prepare('UPDATE outfits SET item_ids = ? WHERE id = ?').run(JSON.stringify(rest), outfit.id);
+        else this.deleteOutfit(outfit.id);
+      }
+    }
+    return deleted;
   }
 
   stats() {

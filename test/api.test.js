@@ -214,3 +214,40 @@ test('wardrobeToText는 빈 필드를 생략한다', () => {
   assert.ok(text.includes('"id":"a"'));
   assert.ok(!text.includes('color'));
 });
+
+test('검색어의 %, _ 는 와일드카드가 아닌 글자로 찾는다', async () => {
+  const special = (await req('/api/items', { method: 'POST', form: itemForm({ name: '100% 린넨 셔츠', category: 'top' }) })).data;
+  assert.deepEqual((await req(`/api/items?q=${encodeURIComponent('%')}`)).data.map((i) => i.id), [special.id]);
+  assert.equal((await req('/api/items?q=_')).data.length, 0);
+  await req(`/api/items/${special.id}`, { method: 'DELETE' });
+});
+
+test('옷을 지우면 저장한 코디에서도 빠지고, 빈 코디는 사라진다', async () => {
+  const a = (await req('/api/items', { method: 'POST', form: itemForm({ name: 'A', category: 'top' }) })).data;
+  const b = (await req('/api/items', { method: 'POST', form: itemForm({ name: 'B', category: 'bottom' }) })).data;
+  const both = (await req('/api/outfits', { method: 'POST', json: { title: '둘 다', item_ids: [a.id, b.id] } })).data;
+  await req('/api/outfits', { method: 'POST', json: { title: 'A만', item_ids: [a.id] } });
+  await req(`/api/items/${a.id}`, { method: 'DELETE' });
+  const outfits = (await req('/api/outfits')).data;
+  assert.equal(outfits.length, 1);
+  assert.equal(outfits[0].id, both.id);
+  assert.deepEqual(outfits[0].item_ids, [b.id]);
+  await req(`/api/items/${b.id}`, { method: 'DELETE' });
+  assert.equal((await req('/api/outfits')).data.length, 0);
+});
+
+test('깨진 JSON 요청은 500이 아니라 400을 돌려준다', async () => {
+  const res = await fetch(`${base}/api/outfits`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: '{bad' });
+  assert.equal(res.status, 400);
+  assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+});
+
+test('비밀번호를 10번 틀리면 잠시 로그인을 막는다', async () => {
+  const app = createApp({ store: openDb(':memory:'), ai: createAi({ client: fakeClient(() => ({})) }), uploadDir: path.join(dir, 'up2'), password: 'pw' });
+  const srv = await new Promise((r) => { const s = app.listen(0, () => r(s)); });
+  const url = `http://127.0.0.1:${srv.address().port}/api/login`;
+  const login = (password) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password }) });
+  for (let i = 0; i < 10; i++) assert.equal((await login('x')).status, 401);
+  assert.equal((await login('pw')).status, 429);
+  srv.close();
+});

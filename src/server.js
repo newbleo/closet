@@ -68,6 +68,10 @@ export function createApp({ store, ai, uploadDir, password = '', secret = '' }) 
   fs.mkdirSync(uploadDir, { recursive: true });
   const app = express();
   app.disable('x-powered-by');
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    next();
+  });
   app.use(express.json({ limit: '1mb' }));
 
   const upload = multer({
@@ -82,11 +86,24 @@ export function createApp({ store, ai, uploadDir, password = '', secret = '' }) 
   const sessionToken = createHmac('sha256', secret || password || 'closet').update(`session:${password}`).digest('hex');
   const isAuthed = (req) => !authRequired || safeEqual(parseCookies(req.headers.cookie)[COOKIE] || '', sessionToken);
 
+  // 비밀번호 무차별 대입을 막기 위해 IP당 15분에 10번까지만 틀릴 수 있다.
+  const failures = new Map();
+  const LOCK_WINDOW = 15 * 60 * 1000;
+  const MAX_FAILURES = 10;
+
   app.post('/api/login', (req, res) => {
     if (!authRequired) return res.json({ ok: true });
+    const now = Date.now();
+    for (const [ip, f] of failures) if (now - f.first > LOCK_WINDOW) failures.delete(ip);
+    const record = failures.get(req.ip);
+    if (record && record.count >= MAX_FAILURES) {
+      return res.status(429).json({ error: '비밀번호를 너무 많이 틀렸어요. 15분 뒤에 다시 시도하세요.' });
+    }
     if (!safeEqual(String(req.body?.password ?? ''), password)) {
+      failures.set(req.ip, { first: record?.first ?? now, count: (record?.count ?? 0) + 1 });
       return res.status(401).json({ error: '비밀번호가 틀렸습니다.' });
     }
+    failures.delete(req.ip);
     const secure = req.secure || req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
     res.setHeader('Set-Cookie', `${COOKIE}=${sessionToken}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24 * 180}${secure}`);
     res.json({ ok: true });
@@ -213,6 +230,8 @@ export function createApp({ store, ai, uploadDir, password = '', secret = '' }) 
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
     if (err instanceof HttpError || err instanceof AiError) return res.status(err.status).json({ error: err.message });
+    if (err.type === 'entity.parse.failed') return res.status(400).json({ error: '요청 형식이 올바르지 않아요.' });
+    if (err.type === 'entity.too.large') return res.status(413).json({ error: '요청이 너무 커요.' });
     if (err instanceof multer.MulterError) {
       const msg = err.code === 'LIMIT_FILE_SIZE' ? '이미지가 너무 커요 (최대 15MB).' : err.message;
       return res.status(400).json({ error: msg });

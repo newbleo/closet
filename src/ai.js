@@ -125,7 +125,7 @@ export function createAi({ client, model = DEFAULT_MODEL } = {}) {
       if (err instanceof AiError) throw err;
       if (err instanceof Anthropic.AuthenticationError) throw new AiError('Anthropic API 키가 올바르지 않습니다.', 503);
       if (err instanceof Anthropic.RateLimitError) throw new AiError('AI 요청이 많아요. 잠시 후 다시 시도해 주세요.', 429);
-      if (err instanceof Anthropic.BadRequestError) throw new AiError(`AI 요청 오류: ${err.message}`, 400);
+      if (err instanceof Anthropic.BadRequestError) throw new AiError(`AI 요청 오류: ${err.error?.error?.message ?? err.message}`, 400);
       if (err instanceof Anthropic.APIError) throw new AiError(`AI 서버 오류 (${err.status ?? '연결 실패'})`);
       throw err;
     }

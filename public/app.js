@@ -16,6 +16,8 @@ const state = {
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
+class AuthError extends Error {}
+
 async function api(path, { method = 'GET', json, form } = {}) {
   const opts = { method, headers: {} };
   if (json) {
@@ -27,7 +29,7 @@ async function api(path, { method = 'GET', json, form } = {}) {
   const res = await fetch(path, opts);
   if (res.status === 401 && path !== '/api/login') {
     showLogin();
-    throw new Error('로그인이 필요합니다.');
+    throw new AuthError('로그인이 필요합니다.');
   }
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
@@ -56,19 +58,54 @@ function thumbHtml(item, cls = '') {
 
 const loadingHtml = (msg) => `<div class="loading"><div class="spinner"></div>${esc(msg)}</div>`;
 
+async function decodeImage(file) {
+  try {
+    return await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch {
+    // createImageBitmap을 지원하지 않는 브라우저는 <img>로 디코딩한다.
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      return img;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+}
+
 // 사진을 최대 1280px JPEG로 줄여서 업로드 용량과 AI 비용을 줄인다.
 async function shrinkImage(file, max = 1280) {
   try {
-    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
-    const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
+    const src = await decodeImage(file);
+    const w = src.naturalWidth || src.width;
+    const h = src.naturalHeight || src.height;
+    const scale = Math.min(1, max / Math.max(w, h));
     const canvas = document.createElement('canvas');
-    canvas.width = Math.round(bitmap.width * scale);
-    canvas.height = Math.round(bitmap.height * scale);
-    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    canvas.width = Math.round(w * scale);
+    canvas.height = Math.round(h * scale);
+    const ctx = canvas.getContext('2d');
+    // JPEG는 투명도가 없어서 배경을 칠하지 않으면 투명한 부분이 검게 나온다.
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
     const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.85));
     return blob || file;
   } catch {
     return file; // 브라우저가 디코딩하지 못하면 원본 그대로
+  }
+}
+
+// 미리보기 이미지를 바꿀 때 이전 blob URL을 해제한다.
+function setPreview(img, src) {
+  if (img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
+  if (src) {
+    img.src = src;
+    img.hidden = false;
+  } else {
+    img.removeAttribute('src');
+    img.hidden = true;
   }
 }
 
@@ -149,11 +186,15 @@ async function loadAllItems() {
   state.itemsById = new Map(all.map((i) => [i.id, i]));
 }
 
+let itemsRequest = 0;
 async function loadItems() {
+  const seq = ++itemsRequest;
   const params = new URLSearchParams();
   if (state.category) params.set('category', state.category);
   if (state.q) params.set('q', state.q);
-  state.items = await api(`/api/items?${params}`);
+  const items = await api(`/api/items?${params}`);
+  if (seq !== itemsRequest) return; // 더 최근 검색 결과가 이미 도착했으면 무시
+  state.items = items;
   renderItems();
 }
 
@@ -188,7 +229,13 @@ document.addEventListener('click', (e) => {
 });
 
 async function refreshCloset() {
-  await Promise.all([loadMeta(), loadItems(), loadAllItems()]);
+  await loadMeta();
+  // 선택한 카테고리의 옷을 모두 지우면 칩이 사라지므로 전체 보기로 돌아간다.
+  if (state.category && !state.meta.counts[state.category]) {
+    state.category = '';
+    renderChips();
+  }
+  await Promise.all([loadItems(), loadAllItems()]);
 }
 
 // ---------- 옷 추가/수정 ----------
@@ -218,14 +265,7 @@ function openItemDialog(item = null) {
   $('#ai-status').hidden = true;
   $('#item-dialog-title').textContent = item ? '옷 정보' : '옷 추가';
   $('#delete-item').hidden = !item;
-  const preview = $('#item-preview');
-  if (item?.image) {
-    preview.src = `/uploads/${item.image}`;
-    preview.hidden = false;
-  } else {
-    preview.removeAttribute('src');
-    preview.hidden = true;
-  }
+  setPreview($('#item-preview'), item?.image ? `/uploads/${item.image}` : null);
   if (item) fillForm(item);
   else if (state.category) form.category.value = state.category;
   dialog.showModal();
@@ -243,9 +283,7 @@ $('#item-file').addEventListener('change', async (e) => {
   if (!file) return;
   const blob = await shrinkImage(file);
   state.itemImage = blob;
-  const preview = $('#item-preview');
-  preview.src = URL.createObjectURL(blob);
-  preview.hidden = false;
+  setPreview($('#item-preview'), URL.createObjectURL(blob));
   // 새 옷이면 사진만 올려도 AI가 정보를 자동으로 채운다.
   if (!state.editing) analyzePhoto(blob);
 });
@@ -395,9 +433,7 @@ $('#shop-file').addEventListener('change', async (e) => {
   e.target.value = '';
   if (!file) return;
   state.shopImage = await shrinkImage(file);
-  const preview = $('#shop-preview');
-  preview.src = URL.createObjectURL(state.shopImage);
-  preview.hidden = false;
+  setPreview($('#shop-preview'), URL.createObjectURL(state.shopImage));
 });
 
 $('#shop-form').addEventListener('submit', async (e) => {
@@ -470,4 +506,10 @@ async function start() {
   setupItemForm();
 }
 
-start().catch((err) => toast(err.message));
+// 처리하지 못한 오류는 토스트로 보여 준다. (로그인 만료는 로그인 화면이 이미 떴으니 조용히 넘어간다)
+window.addEventListener('unhandledrejection', (e) => {
+  e.preventDefault();
+  if (!(e.reason instanceof AuthError)) toast(e.reason?.message || '오류가 발생했어요.');
+});
+
+start();
