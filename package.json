@@ -1,0 +1,30 @@
+{
+  "name": "closet",
+  "version": "1.0.0",
+  "description": "사진으로 관리하는 내 옷장 + AI 코디 추천/쇼핑 도우미",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/index.js",
+    "dev": "node --watch --disable-warning=ExperimentalWarning src/index.js",
+    "test": "node --disable-warning=ExperimentalWarning --test 'test/*.test.js'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/newbleo/closet.git"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/newbleo/closet/issues"
+  },
+  "homepage": "https://github.com/newbleo/closet#readme",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
+    "express": "^4.22.3",
+    "multer": "^2.4.0"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "private": true
+}

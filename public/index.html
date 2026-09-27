@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f6f3ee" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#1b1a18" media="(prefers-color-scheme: dark)" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="내 옷장" />
+  <title>내 옷장</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icon.svg" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="login" class="login" hidden>
+    <form id="login-form" class="login-card">
+      <div class="logo">👕</div>
+      <h1>내 옷장</h1>
+      <p class="muted">비밀번호를 입력하세요</p>
+      <input type="password" name="password" autocomplete="current-password" placeholder="비밀번호" required />
+      <button class="btn primary" type="submit">들어가기</button>
+      <p class="error" id="login-error"></p>
+    </form>
+  </div>
+
+  <div id="app" hidden>
+    <header class="topbar">
+      <h1 id="page-title">내 옷장</h1>
+      <span class="count" id="total-count"></span>
+    </header>
+
+    <main>
+      <!-- 옷장 -->
+      <section id="view-closet" class="view">
+        <div class="search">
+          <input id="search" type="search" placeholder="이름, 색상, 브랜드, 태그로 검색" />
+        </div>
+        <div class="chips" id="category-chips"></div>
+        <div class="grid" id="item-grid"></div>
+        <div class="empty" id="closet-empty" hidden>
+          <div class="empty-emoji">🧺</div>
+          <p>아직 등록된 옷이 없어요.<br />아래 <b>＋ 추가</b>를 눌러 옷 사진을 찍어 보세요.</p>
+        </div>
+      </section>
+
+      <!-- 코디 추천 -->
+      <section id="view-outfits" class="view" hidden>
+        <form id="outfit-form" class="card form">
+          <h2>✨ AI 코디 추천</h2>
+          <label>어디 가나요?<input name="occasion" placeholder="예: 출근, 소개팅, 주말 나들이, 결혼식 하객" /></label>
+          <label>날씨 / 계절<input name="weather" placeholder="예: 쌀쌀한 가을 저녁, 15도, 비 옴" /></label>
+          <label>원하는 스타일<input name="style" placeholder="예: 미니멀, 캐주얼, 꾸안꾸" /></label>
+          <button class="btn primary" type="submit">코디 추천 받기</button>
+        </form>
+        <div id="outfit-results"></div>
+        <h2 class="section-title">💾 저장한 코디</h2>
+        <div id="saved-outfits"></div>
+      </section>
+
+      <!-- 쇼핑 도우미 -->
+      <section id="view-shop" class="view" hidden>
+        <form id="shop-form" class="card form">
+          <h2>🛍️ 이 옷 살까?</h2>
+          <p class="muted small">매장이나 쇼핑몰에서 본 옷 사진을 올리면 내 옷장에 비슷한 옷이 있는지, 뭐랑 어울리는지 알려 줘요.</p>
+          <div class="photo-pick small-pick" data-target="shop">
+            <img id="shop-preview" alt="" hidden />
+            <span class="photo-hint">📷 사진 찍기 / 선택</span>
+            <input type="file" accept="image/*" id="shop-file" />
+          </div>
+          <label>설명 (선택)<input name="description" placeholder="예: 베이지 트렌치코트, 12만원" /></label>
+          <button class="btn primary" type="submit">내 옷장과 비교하기</button>
+        </form>
+        <div id="shop-result"></div>
+
+        <form id="gap-form" class="card form">
+          <h2>🧩 무엇을 더 살까?</h2>
+          <p class="muted small">옷장 전체를 분석해서 코디 가짓수를 늘려 줄 아이템을 추천해요.</p>
+          <label>고려할 점 (선택)<input name="focus" placeholder="예: 다가오는 겨울, 출근룩 위주, 예산 30만원" /></label>
+          <button class="btn primary" type="submit">쇼핑 리스트 만들기</button>
+        </form>
+        <div id="gap-result"></div>
+      </section>
+    </main>
+
+    <nav class="tabbar">
+      <button data-view="closet" class="active"><span>👚</span>옷장</button>
+      <button data-view="outfits"><span>✨</span>코디</button>
+      <button id="add-btn" class="add"><span>＋</span>추가</button>
+      <button data-view="shop"><span>🛍️</span>쇼핑</button>
+      <button id="logout-btn"><span>🚪</span>나가기</button>
+    </nav>
+  </div>
+
+  <!-- 옷 추가/수정 -->
+  <dialog id="item-dialog">
+    <form id="item-form" class="form" method="dialog">
+      <div class="dialog-head">
+        <h2 id="item-dialog-title">옷 추가</h2>
+        <button type="button" class="icon-btn" data-close aria-label="닫기">✕</button>
+      </div>
+      <div class="photo-pick" data-target="item">
+        <img id="item-preview" alt="" hidden />
+        <span class="photo-hint">📷 사진 찍기 / 선택</span>
+        <input type="file" accept="image/*" id="item-file" />
+      </div>
+      <p class="ai-status" id="ai-status" hidden></p>
+      <label>이름 *<input name="name" required placeholder="예: 네이비 울 니트" /></label>
+      <div class="row">
+        <label>카테고리 *<select name="category" required></select></label>
+        <label>세부 종류<input name="subcategory" placeholder="예: 니트" /></label>
+      </div>
+      <div class="row">
+        <label>색상<input name="color" /></label>
+        <label>브랜드<input name="brand" /></label>
+      </div>
+      <div class="row">
+        <label>사이즈<input name="size" /></label>
+        <label class="check"><input type="checkbox" name="favorite" /> ❤️ 즐겨찾기</label>
+      </div>
+      <fieldset class="seasons"><legend>계절</legend><div id="season-boxes"></div></fieldset>
+      <label>태그 (쉼표로 구분)<input name="tags" placeholder="캐주얼, 오버핏, 린넨" /></label>
+      <label>메모<textarea name="notes" rows="2"></textarea></label>
+      <div class="dialog-actions">
+        <button type="button" class="btn danger" id="delete-item" hidden>삭제</button>
+        <button type="submit" class="btn primary" id="save-item">저장</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
